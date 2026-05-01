@@ -58,7 +58,13 @@ def intervene_h3_local(
     # Hook to capture hidden state BEFORE the LM head sees it
     captured_h = [None]
     def _capture_hook(module, inp, output):
-        captured_h[0] = output[0][0, -1, :].detach().float().cpu()
+        # Safely handle both tuple and raw tensor outputs from the layer
+        hidden_states = output[0] if isinstance(output, tuple) else output
+        
+        if hidden_states.dim() == 3:
+            captured_h[0] = hidden_states[0, -1, :].detach().float().cpu()
+        elif hidden_states.dim() == 2:
+            captured_h[0] = hidden_states[-1, :].detach().float().cpu()
         return output
 
     hook_handle = lang_model.layers[best_layer].register_forward_hook(_capture_hook)
