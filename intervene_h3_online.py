@@ -138,9 +138,16 @@ def generate_with_h3_steering(
     captured_h = [None]   # mutable 1-element list so the closure can write
 
     def _capture_hook(module, inp, output):
-        # output[0] : [batch, seq, hidden]  (full forward, seq=1 after first step)
-        captured_h[0] = output[0][0, -1, :].detach().float().cpu()  # [hidden]
-        return output   # unmodified — we only CAPTURE here
+        # Safely handle both tuple and raw tensor outputs from the layer
+        hidden_states = output[0] if isinstance(output, tuple) else output
+        
+        if hidden_states.dim() == 3:
+            captured_h[0] = hidden_states[0, -1, :].detach().float().cpu()
+        elif hidden_states.dim() == 2:
+            captured_h[0] = hidden_states[-1, :].detach().float().cpu()
+        else:
+            captured_h[0] = hidden_states.detach().float().cpu()
+        return output
 
     hook_handle = lang_model.layers[best_layer].register_forward_hook(_capture_hook)
 
