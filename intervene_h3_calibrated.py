@@ -116,12 +116,22 @@ def intervene_h3_calibrated(
     suppress_ids = set()
     for base_obj in absent_bases:
         for variant in base_to_syns.get(base_obj, [base_obj]):
-            for prefix_str in [variant, " " + variant]:
-                for tid in processor.tokenizer.encode(
-                    prefix_str, add_special_tokens=False
-                ):
-                    if processor.tokenizer.decode([tid]).strip():
-                        suppress_ids.add(tid)
+            variants_to_check = [
+                variant.lower(),
+                variant.capitalize(),
+                variant.upper()
+            ]
+            
+            for v in variants_to_check:
+                for prefix_str in [v, " " + v]:
+                    encoded_tids = processor.tokenizer.encode(
+                        prefix_str, add_special_tokens=False
+                    )
+                    
+                    if len(encoded_tids) == 1:
+                        tid = encoded_tids[0]
+                        if processor.tokenizer.decode([tid]).strip():
+                            suppress_ids.add(tid)
 
     if not suppress_ids:
         return pass1_text, pass1_text, [], object_h3_proj
