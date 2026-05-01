@@ -5,6 +5,7 @@ except ImportError:
     _lemmatizer = WordNetLemmatizer()
     def singularize(word):
         return _lemmatizer.lemmatize(word)
+from config import MAX_TOKENS
 import os
 import sys
 import json
