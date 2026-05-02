@@ -167,7 +167,14 @@ def generate_with_h3_steering(
             # These are plain tuple references — no clone needed because
             # HuggingFace Llama returns NEW concatenated tensors each step.
             if past_key_values is not None:
-                old_upper_pkv = past_key_values[best_layer + 1:]   # tuple slice
+                # Safely handle both legacy tuples and modern DynamicCache objects
+                if hasattr(past_key_values, "key_cache"):
+                    old_upper_pkv = [
+                        (past_key_values.key_cache[i], past_key_values.value_cache[i])
+                        for i in range(best_layer + 1, len(past_key_values.key_cache))
+                    ]
+                else:
+                    old_upper_pkv = past_key_values[best_layer + 1:]
             else:
                 old_upper_pkv = None
 
