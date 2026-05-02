@@ -125,10 +125,9 @@ def generate_with_h3_steering(
     try:
         for step in range(max_new_tokens):
             if past_key_values is not None:
-                # Robust integer indexing for Cache compatibility
-                old_upper_pkv = [
-                    past_key_values[i] for i in range(best_layer + 1, n_layers)
-                ]
+                # UNIVERSAL FIX: Cast any Hugging Face Cache object to a legacy tuple
+                legacy_cache = tuple(past_key_values)
+                old_upper_pkv = legacy_cache[best_layer + 1 : n_layers]
             else:
                 old_upper_pkv = None
 
