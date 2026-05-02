@@ -140,7 +140,7 @@ def generate_with_h3_steering(
     def _capture_hook(module, inp, output):
         # Safely handle both tuple and raw tensor outputs from the layer
         hidden_states = output[0] if isinstance(output, tuple) else output
-        
+
         if hidden_states.dim() == 3:
             captured_h[0] = hidden_states[0, -1, :].detach().float().cpu()
         elif hidden_states.dim() == 2:
@@ -164,21 +164,19 @@ def generate_with_h3_steering(
         for step in range(max_new_tokens):
 
             # Save the PRE-STEP KV cache for layers above best_layer.
-            # These are plain tuple references — no clone needed because
-            # HuggingFace Llama returns NEW concatenated tensors each step.
             if past_key_values is not None:
                 try:
                     # Legacy tuple slicing
                     old_upper_pkv = past_key_values[best_layer + 1:]
                 except (TypeError, KeyError):
-                    # Handle DynamicCache
-                    if hasattr(past_key_values, 'to_legacy_cache'):
+                    # Handle DynamicCache (Modern Transformers)
+                    if hasattr(past_key_values, "to_legacy_cache"):
                         old_upper_pkv = past_key_values.to_legacy_cache()[best_layer + 1:]
                     else:
                         old_upper_pkv = tuple(
                             (past_key_values.key_cache[i], past_key_values.value_cache[i])
-                            for i in i in range(best_layer + 1, len(past_key_values.key_cache))
                             for i in range(best_layer + 1, len(past_key_values.key_cache))
+                        )
             else:
                 old_upper_pkv = None
 
