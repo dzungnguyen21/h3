@@ -169,18 +169,19 @@ def generate_with_h3_steering(
             if past_key_values is not None:
                 # Safely handle both legacy tuples and modern DynamicCache objects
                 # Check if past_key_values is a new Cache object
+                # Kiểm tra xem past_key_values có phải là đối tượng Cache mới không
                 if hasattr(past_key_values, "to_legacy_cache"):
-                    # Convert to the old tuple format, then slice
+                    # Chuyển đổi về định dạng tuple kiểu cũ, sau đó mới cắt
                     legacy_pkv = past_key_values.to_legacy_cache()
                     old_upper_pkv = legacy_pkv[best_layer + 1:]
                 elif hasattr(past_key_values, "key_cache"):
-                    # Fallback manual extraction if to_legacy_cache isn't available
+                    # Trích xuất thủ công nếu dùng phiên bản cache không có hàm to_legacy_cache
                     old_upper_pkv = tuple(
                         (past_key_values.key_cache[i], past_key_values.value_cache[i])
                         for i in range(best_layer + 1, len(past_key_values.key_cache))
                     )
                 else:
-                    # Standard slicing for older transformers versions
+                    # Dành cho phiên bản transformers cũ (khi past_key_values vẫn là tuple)
                     old_upper_pkv = past_key_values[best_layer + 1:]
             else:
                 old_upper_pkv = None
