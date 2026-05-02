@@ -1,27 +1,36 @@
 """
 intervene_h3_online.py
 ======================
-Single-pass H3 Activation Steering.
+Single-pass H3 Activation Steering (Surgical Trigger Edition).
 """
 
 import torch
 import numpy as np
 from collections import defaultdict
 from config import MAX_TOKENS, PROMPT
+import inspect
 
 
 # ---------------------------------------------------------------------------
-# Helper: build the set of COCO object token IDs
+# Helper: build the set of COCO object token IDs with Stop-Word Filtering
 # ---------------------------------------------------------------------------
 
 def _build_coco_token_ids(tokenizer, evaluator) -> set:
     token_ids = set()
     all_surface_forms = list(evaluator.inverse_synonym_dict.keys())
+    
+    # Common English stop-words and prefixes that should NEVER trigger a noun-state probe
+    stop_words = {"a", "an", "the", "in", "on", "of", "and", "is", "to", "with", "for", "it", "at", "by", "as"}
+    
     for word in all_surface_forms:
         for prefix in [word, " " + word]:
             ids = tokenizer.encode(prefix, add_special_tokens=False)
             for tid in ids:
-                if tokenizer.decode([tid]).strip():
+                decoded = tokenizer.decode([tid]).strip().lower()
+                # 1. Must not be empty
+                # 2. Must be longer than 1 character (prevents triggering on "s" or "O")
+                # 3. Must not be a common stop word
+                if decoded and len(decoded) > 1 and decoded not in stop_words:
                     token_ids.add(tid)
     return token_ids
 
@@ -33,19 +42,31 @@ def _build_coco_token_ids(tokenizer, evaluator) -> set:
 def _partial_forward(language_model, h, layer_start, layer_end,
                      attention_mask, position_ids, pkv_slice):
     present_kvs = []
+    
+    # Calculate position embeddings required by newer Transformers versions
+    kwargs = {}
+    if hasattr(language_model, "rotary_emb"):
+        sig = inspect.signature(language_model.layers[0].forward)
+        if "position_embeddings" in sig.parameters:
+            kwargs["position_embeddings"] = language_model.rotary_emb(h, position_ids)
+
     for rel_idx, layer_idx in enumerate(range(layer_start, layer_end)):
         layer = language_model.layers[layer_idx]
         past_kv = pkv_slice[rel_idx] if pkv_slice is not None else None
+        
         layer_out = layer(
-            h,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_value=past_kv,
-            use_cache=True,
-            output_attentions=False,
+            h, attention_mask=attention_mask, position_ids=position_ids,
+            past_key_value=past_kv, use_cache=True, output_attentions=False,
+            **kwargs
         )
-        h = layer_out[0]
-        present_kvs.append(layer_out[1])
+        # Safely extract hidden state regardless of tuple format
+        if isinstance(layer_out, tuple):
+            h = layer_out[0]
+            if len(layer_out) > 1:
+                present_kvs.append(layer_out[1])
+        else:
+            h = layer_out
+            
     return h, present_kvs
 
 
@@ -61,10 +82,9 @@ def generate_with_h3_steering(
     h3_calibrated_results,
     evaluator,
     steering_strength: float = 3.0,
-    top_k_coco: int = 50,
+    top_k_coco: int = 1,  # SURGICAL TRIGGER: Only steer if model is fully committed to a noun
     max_new_tokens: int = MAX_TOKENS,
 ):
-    # ── Unpack trained artefacts ──────────────────────────────────────────
     best_layer  = h3_results["best_layer"]
     scaler      = h3_results["scaler"]
     direction   = h3_results["direction"]
@@ -105,7 +125,7 @@ def generate_with_h3_steering(
     try:
         for step in range(max_new_tokens):
             if past_key_values is not None:
-                # FIX: Use integer indexing which works for both legacy tuples and modern Cache objects
+                # Robust integer indexing for Cache compatibility
                 old_upper_pkv = [
                     past_key_values[i] for i in range(best_layer + 1, n_layers)
                 ]
@@ -123,6 +143,7 @@ def generate_with_h3_steering(
             logits          = fwd_out.logits[0, -1, :]
             past_key_values = fwd_out.past_key_values
 
+            # SURGICAL TRIGGER: Check top_k=1 instead of 50
             top_k_ids     = torch.topk(logits, top_k_coco).indices
             coco_in_top_k = bool(any(tid.item() in coco_ids_set for tid in top_k_ids))
 
@@ -143,7 +164,9 @@ def generate_with_h3_steering(
 
                     seq_len_so_far = prompt_len + len(generated_ids)
                     position_ids = torch.tensor([[seq_len_so_far - 1]], device=model.device)
-                    attn_mask    = torch.ones(1, seq_len_so_far, device=model.device, dtype=torch.long)
+                    
+                    # No attention mask needed for single-token decoding
+                    attn_mask = None
 
                     with torch.inference_mode():
                         h_out, _ = _partial_forward(lang_model, h_steer_dev, best_layer + 1, n_layers, attn_mask, position_ids, old_upper_pkv)
@@ -169,6 +192,7 @@ def generate_with_h3_steering(
     return caption, step_metadata
 
 
-def intervene_h3_online(model, processor, image, h3_results, h3_calibrated_results, evaluator, steering_strength=3.0, top_k_coco=50, max_new_tokens=MAX_TOKENS):
+def intervene_h3_online(model, processor, image, h3_results, h3_calibrated_results, evaluator, steering_strength=3.0, top_k_coco=1, max_new_tokens=MAX_TOKENS):
+    # Notice we pass top_k_coco=1 down to the steering function now
     caption, metadata = generate_with_h3_steering(model, processor, image, h3_results, h3_calibrated_results, evaluator, steering_strength, top_k_coco, max_new_tokens)
     return caption, metadata, sum(1 for m in metadata if m["steered"])
