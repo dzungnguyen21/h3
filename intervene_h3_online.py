@@ -168,12 +168,19 @@ def generate_with_h3_steering(
             # HuggingFace Llama returns NEW concatenated tensors each step.
             if past_key_values is not None:
                 # Safely handle both legacy tuples and modern DynamicCache objects
-                if hasattr(past_key_values, "key_cache"):
-                    old_upper_pkv = [
+                # Check if past_key_values is a new Cache object
+                if hasattr(past_key_values, "to_legacy_cache"):
+                    # Convert to the old tuple format, then slice
+                    legacy_pkv = past_key_values.to_legacy_cache()
+                    old_upper_pkv = legacy_pkv[best_layer + 1:]
+                elif hasattr(past_key_values, "key_cache"):
+                    # Fallback manual extraction if to_legacy_cache isn't available
+                    old_upper_pkv = tuple(
                         (past_key_values.key_cache[i], past_key_values.value_cache[i])
                         for i in range(best_layer + 1, len(past_key_values.key_cache))
-                    ]
+                    )
                 else:
+                    # Standard slicing for older transformers versions
                     old_upper_pkv = past_key_values[best_layer + 1:]
             else:
                 old_upper_pkv = None
