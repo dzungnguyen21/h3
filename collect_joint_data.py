@@ -157,9 +157,18 @@ def collect_joint_probe_data(
                 prev = processor.tokenizer.decode(
                     generated_ids[:i], skip_special_tokens=True
                 ).lower()
+                
                 for syn in syns:
                     if syn in prefix and syn not in prev:
-                        target_pos = i
+                        end_pos = i
+                        # Step backward to find the first token of the synonym
+                        for j in range(end_pos, -1, -1):
+                            chunk = processor.tokenizer.decode(
+                                generated_ids[j:end_pos+1], skip_special_tokens=True
+                            ).strip().lower()
+                            if syn in chunk:
+                                target_pos = j
+                                break
                         break
                 if target_pos is not None:
                     break

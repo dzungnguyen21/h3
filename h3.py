@@ -45,7 +45,15 @@ def extract_hidden_states_before_object(
 
         for obj_word in object_words:
             if obj_word.lower() in prefix and obj_word.lower() not in prev:
-                target_pos = i
+                end_pos = i
+                # Step backward to find the first token of the object word
+                for j in range(end_pos, -1, -1):
+                    chunk = processor.tokenizer.decode(
+                        generated_ids[j:end_pos+1], skip_special_tokens=True
+                    ).strip().lower()
+                    if obj_word.lower() in chunk:
+                        target_pos = j
+                        break
                 break
         if target_pos is not None:
             break
