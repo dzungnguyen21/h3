@@ -97,7 +97,17 @@ def collect_existence_probe_data(
     image_dir: str = "coco/images/val2014",
     max_images: int = 500,
     layers_to_probe: list = None,
+    cache_path: str = "existence_probe_data.pkl"
 ):
+    import os
+    import pickle
+    
+    if os.path.exists(cache_path):
+        print(f"\n  [CACHE] Loading cached probe data from {cache_path}...")
+        with open(cache_path, "rb") as f:
+            data_by_layer, layers_to_probe = pickle.load(f)
+        return data_by_layer, layers_to_probe
+
     n_layers = len(model.model.language_model.layers)
     if layers_to_probe is None:
         layers_to_probe = list(range(0, n_layers // 2, 4)) + \
@@ -188,6 +198,12 @@ def collect_existence_probe_data(
                 hallucinated=n_hall_total,
                 skipped=skipped
             )
+
+    
+    import pickle
+    print(f"\n  [CACHE] Saving probe data to {cache_path}...")
+    with open(cache_path, "wb") as f:
+        pickle.dump((data_by_layer, layers_to_probe), f)
 
     return data_by_layer, layers_to_probe
 
@@ -307,30 +323,18 @@ def plot_h3_results(probe_results: dict, proj_grounded, proj_hallucinated, best_
     print("Saved: exp_h3_existence_direction.png")
 
 
-import os
-import pickle
-
-def run_h3(model, processor, annotations, evaluator, image_dir="coco/images/val2014", max_images=300, cache_path="existence_probe_data.pkl"):
+def run_h3(model, processor, annotations, evaluator, image_dir="coco/images/val2014", max_images=300):
     print("=" * 60)
     print("EXPERIMENT H3: Existence Direction Probe")
     print("=" * 60)
 
-    # Step 1: collect hidden states (with caching)
-    if os.path.exists(cache_path):
-        print(f"\n  [CACHE] Loading cached probe data from {cache_path}...")
-        with open(cache_path, "rb") as f:
-            data_by_layer, layers_to_probe = pickle.load(f)
-    else:
-        print(f"\n  [CACHE] Collecting new probe data (this may take a while)...")
-        data_by_layer, layers_to_probe = collect_existence_probe_data(
-            model, processor, annotations,
-            evaluator=evaluator,
-            image_dir=image_dir,
-            max_images=max_images,
-        )
-        print(f"  [CACHE] Saving probe data to {cache_path}...")
-        with open(cache_path, "wb") as f:
-            pickle.dump((data_by_layer, layers_to_probe), f)
+    # Step 1: collect hidden states
+    data_by_layer, layers_to_probe = collect_existence_probe_data(
+        model, processor, annotations,
+        evaluator=evaluator,        # pass evaluator down
+        image_dir=image_dir,
+        max_images=max_images,
+    )
 
     total_samples = len(data_by_layer[layers_to_probe[0]]["X"])
     print(f"\n  Total samples collected: {total_samples}")
