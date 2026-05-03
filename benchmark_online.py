@@ -1,6 +1,7 @@
 import os
 import glob
 import pickle
+import json
 import torch
 from PIL import Image
 from tqdm.auto import tqdm
@@ -17,7 +18,6 @@ def print_summary(name, n_images, n_hall_imgs, n_hall_words, n_recall_words, n_g
     coverage = (n_recall_words / n_gt_words) * 100 if n_gt_words > 0 else 0
     precision = (n_recall_words / total_generated) * 100 if total_generated > 0 else 0
     
-    # F1 Score based on Precision and Coverage (Recall)
     if precision + coverage > 0:
         f1 = 2 * (precision * coverage) / (precision + coverage)
     else:
@@ -36,7 +36,7 @@ def print_summary(name, n_images, n_hall_imgs, n_hall_words, n_recall_words, n_g
     print(f"  F1                       : {f1:.1f}%")
 
 
-def run_online_benchmark(num_images=100, steering_strength=3.0):
+def run_online_benchmark(num_images=500, steering_strength=3.0, top_k_coco=1):
     print('Loading CHAIR Evaluator...')
     evaluator = CHAIR("coco/annotations/annotations")
 
@@ -47,35 +47,47 @@ def run_online_benchmark(num_images=100, steering_strength=3.0):
         with open('h3_calibrated_results.pkl', 'rb') as f:
             h3_calibrated_results = pickle.load(f)
     except FileNotFoundError:
-        print("ERROR: Calibration files not found!")
+        print("ERROR: Calibration files not found! Run make_h3.py and calibration first.")
         return
 
-    image_files = sorted(glob.glob('coco/images/val2014/*.jpg'))
-    image_files = image_files[:num_images]
+    # Load baseline annotations
+    ann_file = "chair_annotations.json"
+    if not os.path.exists(ann_file):
+        print(f"ERROR: Baseline file {ann_file} not found.")
+        return
+        
+    print(f"Loading baseline from {ann_file}...")
+    with open(ann_file, "r", encoding="utf-8") as f:
+        annotations = json.load(f)
+        
+    # Get values and limit to num_images
+    if isinstance(annotations, dict):
+        ann_list = list(annotations.values())
+    else:
+        ann_list = list(annotations)
+        
+    sample_anns = [a for a in ann_list if a.get("generated_caption")][:num_images]
 
     base_hall_imgs = base_hall_words = base_recall_words = base_gt_words = 0
     steer_hall_imgs = steer_hall_words = steer_recall_words = steer_gt_words = 0
+    skipped = 0
 
-    print(f"\\nStarting Benchmark on {len(image_files)} images...")
+    print(f"\\nStarting Benchmark on {len(sample_anns)} images (Strength={steering_strength}, Top-K={top_k_coco})...")
     
-    for img_path in tqdm(image_files):
-        img_id = int(img_path.split('_')[-1].split('.')[0])
+    for ann in tqdm(sample_anns):
+        img_id = ann["image_id"]
+        img_path = os.path.join("coco/images/val2014", ann["file_name"])
+        
         try:
             image = Image.open(img_path).convert('RGB')
         except Exception:
+            skipped += 1
             continue
 
-        # --- 1. Baseline Generation ---
-        prompt = "USER: <image>\\nPlease describe this image in detail.\\nASSISTANT:"
-        inputs = processor(text=prompt, images=image, return_tensors="pt").to(model.device)
-        with torch.inference_mode():
-            baseline_ids = model.generate(**inputs, max_new_tokens=256)
-        baseline_caption = processor.batch_decode(baseline_ids, skip_special_tokens=True)[0]
-        if "ASSISTANT:" in baseline_caption:
-            baseline_caption = baseline_caption.split("ASSISTANT:")[-1].strip()
-
-        # Evaluate Baseline
+        # --- 1. Evaluate Baseline (From JSON) ---
+        baseline_caption = ann["generated_caption"]
         b_res = evaluator.compute_hallucinations(img_id, baseline_caption)
+        
         b_gt = len(b_res.get("mscoco_gt_words", []))
         b_hall = len(b_res.get("mscoco_hallucinated_words", []))
         b_recall = len(b_res.get("recall_words", []))
@@ -94,7 +106,8 @@ def run_online_benchmark(num_images=100, steering_strength=3.0):
             h3_results=h3_results, 
             h3_calibrated_results=h3_calibrated_results, 
             evaluator=evaluator,
-            steering_strength=steering_strength
+            steering_strength=steering_strength,
+            top_k_coco=top_k_coco
         )
 
         # Evaluate Steered
@@ -110,10 +123,10 @@ def run_online_benchmark(num_images=100, steering_strength=3.0):
             steer_hall_imgs += 1
 
     # --- Print Summaries ---
-    print_summary("Baseline", len(image_files), base_hall_imgs, base_hall_words, base_recall_words, base_gt_words)
-    print_summary("Online Steered", len(image_files), steer_hall_imgs, steer_hall_words, steer_recall_words, steer_gt_words)
-
+    actual_processed = len(sample_anns) - skipped
+    print_summary("Baseline", actual_processed, base_hall_imgs, base_hall_words, base_recall_words, base_gt_words)
+    print_summary("Online Steered", actual_processed, steer_hall_imgs, steer_hall_words, steer_recall_words, steer_gt_words)
 
 if __name__ == "__main__":
-    # You can change num_images to 500 for the full benchmark
-    run_online_benchmark(num_images=100, steering_strength=3.0)
+    # Test on all 500 images
+    run_online_benchmark(num_images=500, steering_strength=3.0, top_k_coco=1)
