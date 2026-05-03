@@ -214,7 +214,7 @@ def run_existence_probe(data_by_layer: dict, layers_to_probe: list):
         aucs = []
 
         for train_idx, val_idx in cv.split(X_scaled, y):
-            clf = LogisticRegression(max_iter=1000, C=1.0)
+            clf = LogisticRegression(max_iter=5000, C=1.0)
             clf.fit(X_scaled[train_idx], y[train_idx])
             probs = clf.predict_proba(X_scaled[val_idx])[:, 1]
             aucs.append(roc_auc_score(y[val_idx], probs))
@@ -251,7 +251,7 @@ def extract_existence_direction(data_by_layer: dict, best_layer: int):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    clf = LogisticRegression(max_iter=1000, C=1.0)
+    clf = LogisticRegression(max_iter=5000, C=1.0)
     clf.fit(X_scaled, y)
 
     direction = clf.coef_[0]
