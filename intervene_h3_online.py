@@ -157,8 +157,22 @@ def generate_with_h3_steering(
                 h3_prob = float(clf.predict_proba(feat)[0, 1])
 
                 if h3_prob < prob_thresh:
-                    h_cpu   = captured_h[0].clone()
-                    h_steer = h_cpu + steering_strength * torch.tensor(d_norm, dtype=torch.float32)
+                    # 1. We already have the standardized hidden state (h_std)
+                    # Find exactly how deep into the "hallucinated" territory it is
+                    current_proj = np.dot(h_std, d_norm)
+                    
+                    # 2. SURGICAL SUPPRESSION (Orthogonal Projection):
+                    # Subtract the negative hallucination projection to make it neutral (0.0)
+                    h_std_neutral = h_std - (current_proj * d_norm)
+                    
+                    # 3. Add the precise positive steering strength to make it "Grounded"
+                    h_std_steered = h_std_neutral + (steering_strength * d_norm)
+                    
+                    # 4. CRITICAL: Un-standardize back into the raw LLaMA hidden state space!
+                    h_steer_np = (h_std_steered * scaler.scale_) + scaler.mean_
+                    
+                    # Convert back to tensor
+                    h_steer = torch.tensor(h_steer_np, dtype=torch.float32)
                     h_steer_dev = h_steer.to(model.device).to(next(lang_model.parameters()).dtype).unsqueeze(0).unsqueeze(0)
 
                     seq_len_so_far = prompt_len + len(generated_ids)
